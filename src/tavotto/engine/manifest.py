@@ -1254,8 +1254,40 @@ def missing_glyphs(text: str, families) -> list[str]:
 
 
 def _family_options() -> list[str]:
-    """字体下拉的选项：由运行时的解析能力决定，不是写死的一张表。"""
+    """字体下拉的**首选项**：三个通用族 + 装了的那几个具名候选。
+
+    本机全部字体族另走 manifest 顶层的 `font_families`（`installed_font_families`）
+    ——那张表几百个名字，按元素逐条塞进 `options` 会让一份 88 个文字元素的
+    manifest 多出半兆（实测 415 个族 × 88 条），所以整份只发一次，前端把它并进
+    字体下拉的尾部。
+    """
     return [*_GENERIC_FAMILIES, *(n for n in _NAMED_FAMILIES if _font_installed(n))]
+
+
+@lru_cache(maxsize=1)
+def installed_font_families() -> tuple[str, ...]:
+    """这台机器上 matplotlib 找得到的全部字体族（TrueType / OpenType），排好序。
+
+    从前字体下拉只有三个通用族加几个具名候选（`_NAMED_FAMILIES`），用户装了
+    的字体一个都选不到（2026-09-13 用户反馈）。这里问的是 matplotlib 自己的
+    `fontManager`——**它认得的就是渲染时解析得到的**，所以列出来的每一个都
+    画得出来；AFM（Type 1）那批不列，PDF/PS 后端之外用不上。
+
+    macOS 上以 `.` 开头的是系统内部字体（`.SF NS` / `.Aqua Kana`），用户在任何
+    选字体的界面上都看不到它们，这里同样不列。整个进程只算一次：`fontManager`
+    的扫描结果本来就是磁盘缓存来的，但去重排序几百个名字也不值得每份 manifest
+    重做。
+    """
+    names = {
+        str(entry.name)
+        for entry in font_manager.fontManager.ttflist
+        # 以 `.` 开头：macOS 的系统内部字体。含 `?`：FreeType 读不出这张脸的名字
+        # （name 表只有 matplotlib 不认的编码，实测本机 20 个只有中文名的字体全
+        # 读成 `????`）——一个叫 `????` 的选项既认不出是谁，`set_fontfamily` 也
+        # 分不清指的是哪一张，不列。
+        if str(entry.name) and not str(entry.name).startswith(".") and "?" not in str(entry.name)
+    }
+    return tuple(sorted(names, key=lambda n: (n.casefold(), n)))
 
 
 def _text_fields(t) -> list[dict]:
@@ -1264,15 +1296,19 @@ def _text_fields(t) -> list[dict]:
     fam_opts = _family_options()
     fam_missing: list[str] = []
     if fam not in fam_opts:
-        # 脚本自己写死了一个不在选项里的字体名。它是**当前值**，enum 必须含有
+        # 脚本自己写死了一个不在首选项里的字体名。它是**当前值**，enum 必须含有
         # 自己的值，否则界面显示空白。注意这与「提供一个死选项」不是一回事：
         # 能选的只有它自己，选了也只是维持原状，不会新造一次静默失效。
         #
         # **但界面必须知道它是哪一种**：选项表里混着「装了、能画」与「没装、
         # 选了也白选」两类，不标出来的话用户会以为自己刚刚换了字体。
-        # `options_unavailable` 是那条 warning 的唯一依据（`web/src/lib/api.ts`）。
+        # `options_unavailable` 是那条 warning 的唯一依据（`web/src/lib/api.ts`），
+        # 判据是**这个运行时画不画得出**（`font_installed`），不是「在不在首选项
+        # 里」——脚本设了一个装了的字体（`Source Han Sans SC`）时，从前这里也
+        # 把它标成「未安装」，用户看到的是一条对着画得好好的字亮的红灯。
         fam_opts = [fam] + fam_opts
-        fam_missing = [fam]
+        if not _font_installed(fam):
+            fam_missing = [fam]
     patch = t.get_bbox_patch()
     if patch is not None:
         pad, rounded = _boxstyle_info(patch)
@@ -1888,7 +1924,7 @@ def _collection_fields(coll, state: FigState, gid: str, *, label: bool) -> list[
             }
         )
     if "mapped" in caps:
-        fields += _colormap_fields(coll)
+        fields += _colormap_fields(coll, state, gid)
     fields.append(
         {
             "prop": "zorder",
@@ -1908,25 +1944,167 @@ def _hatch_options(current) -> list[str]:
     return ([cur] if cur and cur not in HATCHES else []) + HATCHES
 
 
-def _colormap_fields(m) -> list[dict]:
+#: 离散色图（`ListedColormap`）逐格报色的格数上限：`ListedColormap([a, b, c])`
+#: 那种手写的三五个色块要**按格**画（色块之间没有过渡），而 viridis 也是一个
+#: 256 格的 ListedColormap——它要按连续渐变画。超过这个数按连续色图采样。
+_DISCRETE_CMAP_MAX = 32
+#: 连续色图的采样点数——与前端 `colormapStops.ts` 那张离线表同一口径（9 点）。
+_CMAP_SAMPLES = 9
+
+
+def _registered_colormap(cm) -> bool:
+    """这张色图就是注册表里的那张：名字查得到，**而且**查出来的与它画得一样。
+
+    判据的主语是**对象**，不是名字。名字不够用有两个方向：`ListedColormap([...])`
+    的默认名是 matplotlib 给的、跨版本会变（3.10 叫 `from_list`，3.11.2 起叫
+    `unnamed`），钉住任何一个字面量都只在一档 matplotlib 上对；反过来
+    `ListedColormap([...], name="viridis")`、`get_cmap("viridis", 5)`、
+    `.with_extremes(bad=…)` 的名字都在注册表里，可写回 `cmap: "viridis"` 得到的是
+    另一张图。`Colormap.__eq__` 比的是整张查找表（含 under / over / bad），正是
+    「写这个名字回去能不能复现」的那把尺子；注册表按名取出的是副本，`is` 恒假。
+    用户 `matplotlib.colormaps.register(...)` 过的自定义色图按注册表算：名字写得
+    进 override、取回来一样，就是可写的合法取值。
+    """
+    import matplotlib  # noqa: PLC0415 — worker 侧有科学栈
+
+    name = str(getattr(cm, "name", "") or "")
+    if name not in matplotlib.colormaps:
+        return False
+    try:
+        return bool(matplotlib.colormaps[name] == cm)
+    except Exception:  # noqa: BLE001 — 比不出就当不是那张（`__eq__` 要初始化查找表）
+        return False
+
+
+def _cmap_facts(cm) -> dict:
+    """一张色图**长什么样**的只读事实：`{"name", "custom", "stops", "discrete"}`。
+
+    `custom` = 这张色图不是注册表里的那张（`_registered_colormap`）——它的名字
+    **不是**一个能写进 `cmap` override 的取值：没注册的 `set_cmap(name)` 当场
+    ValueError，注册了但对象不同的写回去换成另一张图。界面据此显示「自定义」，
+    选它 = 保持原样。`name` 是这张色图自己的名字（事实描述的是谁），原样透传
+    matplotlib 给的词，前端只拿它对事实、当可达名，**不拿它判自定义**。
+
+    `stops` 是按顺序采出来的十六进制色：离散色图（格数不多的 ListedColormap）
+    逐格给、`discrete=True`，前端画成硬边色块；其余按九点均匀采样，与内置表
+    同一口径。前端的离线表只认 `CMAPS` 白名单里的名字，白名单之外的（自定义、
+    或 `Blues` 这类注册了但没进白名单的）都靠这条事实才画得出渐变条。
+    """
+    from matplotlib.colors import ListedColormap  # noqa: PLC0415 — worker 侧有科学栈
+
+    name = str(getattr(cm, "name", "") or "")
+    discrete = isinstance(cm, ListedColormap) and int(cm.N) <= _DISCRETE_CMAP_MAX
+    if discrete:
+        stops = [to_hex(cm(i)) for i in range(int(cm.N))]
+    else:
+        stops = [to_hex(cm(i / (_CMAP_SAMPLES - 1))) for i in range(_CMAP_SAMPLES)]
+    # `name` 跟着事实走：override 刚写下、渲染还没回来的那一拍，前端手里的
+    # `value` 已经是新名字而事实还是上一张的——事实自己说清「我描述的是谁」，
+    # 前端才判得出这份事实还作不作数，不会把上一张的色标画到新名字头上。
+    return {
+        "name": name,
+        "custom": not _registered_colormap(cm),
+        "stops": stops,
+        "discrete": discrete,
+    }
+
+
+def _cmap_needs_facts(facts: dict) -> bool:
+    """这张色图**不能**由前端按名字查离线表：自定义的（名字不代表它长什么样，
+    哪怕名字在白名单里），或注册了但没进 `CMAPS` 白名单的（离线表没有它）。
+    `cmap_current` 与 `cmap_original` 发不发都问这一条。"""
+    return bool(facts["custom"]) or facts["name"] not in CMAPS
+
+
+def _cmap_alias_gids(state: FigState, artist, gid: str) -> list[str]:
+    """与 `gid` 共用同一份色图状态的全部 gid（色条 ↔ 它的 mappable，
+    `overrides.ALIAS_GROUPS` 的那一对）。回答「脚本原样的色图记在谁名下」：
+    用户从图像那边换的色图，override 落在图像 gid 上；色条这边要报「脚本
+    原样」就得去图像的 originals 里找，反之亦然。"""
+    out = [gid]
+    if isinstance(artist, ColorbarProxy):
+        target = artist.cb.mappable
+    else:
+        target = artist
+    for el in state.elements:
+        other = el["artist"]
+        if isinstance(other, ColorbarProxy) and other.cb.mappable is target and el["gid"] != gid:
+            out.append(el["gid"])
+        elif isinstance(artist, ColorbarProxy) and other is target:
+            out.append(el["gid"])
+    return list(dict.fromkeys(out))
+
+
+def _cmap_original(state: FigState, artist, gid: str) -> dict | None:
+    """**override 之前**那张色图的事实；没有 override 时是 `None`（字段不出现）。
+
+    与 `_marker_original` 同一套规则：判据是 `state.applied` 里有这条
+    `(gid, "cmap")`（别名代采的 `originals` 不算），原值取 `state.originals`
+    ——override 系统第一次应用前采下的那个 Colormap 对象，撤销时回灌的也是它。
+    别名组（色条 ↔ mappable）里任一个 gid 上有 override 都算：「这条色条的
+    脚本原样」不因用户是从图像那边改的就说不出来。
+
+    **只在原样的名字写不回它自己时才发**：白名单里的注册色图本来就在选项表
+    里、选它写一条普通 override 即可；其余的（自定义的写不进 override——哪怕它
+    顶着 `viridis` 的名字，写回去也是另一张图；注册了但没进白名单的换过之后就
+    从选项表里消失了）没有这条事实就再也回不去——只剩「恢复到脚本」那个入口，
+    而它在色图选择器里看不见。
+    """
+    for g in _cmap_alias_gids(state, artist, gid):
+        key = (g, "cmap")
+        if key not in state.applied or key not in state.originals:
+            continue
+        try:
+            orig = state.originals[key]
+            facts = _cmap_facts(orig)
+            return facts if _cmap_needs_facts(facts) else None
+        except Exception:  # noqa: BLE001 — 说不出就是「不知道」，不能让清单构建挂掉
+            return None
+    return None
+
+
+def _cmap_field(m, state: FigState, artist, gid: str) -> dict:
+    """`cmap` 这条 enum 字段的唯一构造处（Collection / AxesImage / 色条共用）。
+
+    `value` 是此刻色图的名字；`options` 只放**写得进 override 的名字**；
+    `cmap_current` / `cmap_original` 是两条只读事实（形态见 `_cmap_facts`），
+    白名单里的注册色图不发（前端有离线表），缺席 = 前端按名字查表。
+    自定义色图**顶着白名单里的名字**时照发：`value` 会与选项表里的一格同名，
+    前端只认事实里的 `custom`，不拿名字判。
+    """
+    cm = m.get_cmap()
+    cname = str(cm.name)
+    field = {
+        "prop": "cmap",
+        "type": "enum",
+        "value": cname,
+        "options": _cmap_options(cname),
+        "group": "颜色映射",
+    }
+    facts = _cmap_facts(cm)
+    if _cmap_needs_facts(facts):
+        field["cmap_current"] = facts
+    orig = _cmap_original(state, artist, gid)
+    if orig is not None:
+        field["cmap_original"] = orig
+    return field
+
+
+def _colormap_fields(m, state: FigState, gid: str, artist=None) -> list[dict]:
     """ScalarMappable（Collection / AxesImage 共用）的颜色映射字段。
 
     `norm` **刻意不开放**：换 norm 改的是「数据怎么被解释成颜色」，那是
     科学结论的一部分，不是排版。vmin/vmax 只是同一个 norm 的定义域，改它
     等价于脚本里写 `clim=`——仍在展示范畴里。
+
+    `artist` 是登记在 `gid` 名下的那个对象（色条时是 ColorbarProxy，其余就是
+    `m` 自己），别名反查用它。
     """
     vmin, vmax = m.get_clim()
     span = abs(float(vmax) - float(vmin)) if vmin is not None and vmax is not None else 1.0
     step = max(span / 100.0, 1e-6)
-    cname = m.get_cmap().name
     return [
-        {
-            "prop": "cmap",
-            "type": "enum",
-            "value": cname,
-            "options": _cmap_options(cname),
-            "group": "颜色映射",
-        },
+        _cmap_field(m, state, m if artist is None else artist, gid),
         {
             "prop": "vmin",
             "type": "number",
@@ -2135,7 +2313,19 @@ def _errorbar_fields(grp) -> list[dict]:
 
 
 def _cmap_options(current: str) -> list[str]:
-    return ([current] if current not in CMAPS else []) + CMAPS
+    """`cmap` 的可选项：白名单，外加当前这个名字——**仅当它写得进 override**。
+
+    注册过、只是没进白名单的（`Blues` / `RdYlGn`…）留着：选项表里没有自己的
+    当前值，换走之后就回不来。**没注册的不放**（`ListedColormap([...])` 那个
+    matplotlib 给的默认名）：`set_cmap(name)` 当场 ValueError，把它摆在选项表里
+    等于摆一个点了就报「应用失败」的按钮；它由 `cmap_current` 事实描述。
+    这里只问名字写不写得进去：自定义色图顶着注册过的名字时那个名字仍在表里
+    ——选它是「换成真正的那张」，合法。
+    """
+    import matplotlib  # noqa: PLC0415 — worker 侧有科学栈
+
+    listed = current not in CMAPS and current in matplotlib.colormaps
+    return ([current] if listed else []) + CMAPS
 
 
 def _arrowpatch_fields(a) -> list[dict]:
@@ -2312,7 +2502,7 @@ def _interpolation_options(current: str) -> list[str]:
     return opts
 
 
-def _image_fields(im) -> list[dict]:
+def _image_fields(im, state: FigState, gid: str) -> list[dict]:
     arr = im.get_array()
     mappable = arr is not None and getattr(arr, "ndim", 0) == 2
     fields = []
@@ -2326,7 +2516,7 @@ def _image_fields(im) -> list[dict]:
     if mappable:
         # 与 Collection 共用同一份「颜色映射」字段：AxesImage 与 Collection 在
         # matplotlib 里同属 ColorizingArtist，cmap/clim 的语义逐字相同
-        fields += _colormap_fields(im)
+        fields += _colormap_fields(im, state, gid)
     interp = str(im.get_interpolation())
     i_opts = _interpolation_options(interp)
     fields += [
@@ -2353,12 +2543,11 @@ def _image_fields(im) -> list[dict]:
     return fields
 
 
-def _colorbar_fields(p) -> list[dict]:
+def _colorbar_fields(p, state: FigState, gid: str) -> list[dict]:
     cb = p.cb
     vmin, vmax = cb.mappable.get_clim()
     span = abs(float(vmax) - float(vmin)) if vmin is not None and vmax is not None else 1.0
     step = max(span / 100.0, 1e-6)
-    cname = cb.mappable.get_cmap().name
     return [
         {"prop": "label", "type": "text", "value": _cb_axis(p).label.get_text()},
         # 方向：就地结构改造（长短轴互换 + 重画色带 + 刻度换轴），实现见
@@ -2418,13 +2607,7 @@ def _colorbar_fields(p) -> list[dict]:
         # 撤掉边色 override，这三条自己就回来了。
         *(
             [
-                {
-                    "prop": "cmap",
-                    "type": "enum",
-                    "value": cname,
-                    "options": _cmap_options(cname),
-                    "group": "颜色映射",
-                },
+                _cmap_field(cb.mappable, state, p, gid),
                 {
                     "prop": "vmin",
                     "type": "number",
@@ -3532,7 +3715,7 @@ def _fields_for(el, state: FigState) -> list[dict]:
     if key == "axes":
         return _axes3d_fields(artist) if role == "axes3d" else _axes_fields(artist, el)
     if key == "image":
-        return _image_fields(artist)
+        return _image_fields(artist, state, gid)
     if key == "arrowpatch":
         return _arrowpatch_fields(artist)
     if key == "patch":
@@ -3553,7 +3736,7 @@ def _fields_for(el, state: FigState) -> list[dict]:
     if key == "errorbar":
         return _errorbar_fields(artist)
     if key == "colorbar":
-        return _colorbar_fields(artist)
+        return _colorbar_fields(artist, state, gid)
     return []
 
 
@@ -3991,6 +4174,16 @@ def _build_manifest(state: FigState, stem: str) -> dict:
             # 名字，这个才是「这是谁的色条」。两者都在 state.index 里认得出
             entry["colorbar_key"] = artist.identity
             entry["host_gid"] = artist.host_gid
+            # 色条的几何归它的**轴**（`axes_i` 的 position override，与位图代理到
+            # 宿主子图同一套 `geom_gid` 机制）。色条元素与色条轴的 bbox 逐位相同，
+            # 而命中测试里色条元素恒胜（容器有降权），于是从前点色条选中的是一个
+            # 既没有手柄也拖不动的伪元素——「色条改不了大小和长度」
+            # （2026-09-13 用户反馈）。色条轴落位不归 Tavotto 管时（插图里的
+            # 色条：`position_locked`）这里也不宣称，两处判据同源。
+            cbax = next((e for e in state.elements if e["gid"] == artist.cbax_gid), None)
+            if cbax is not None and not cbax.get("position_locked", False):
+                entry["resizable"] = True
+                entry["geom_gid"] = artist.cbax_gid
             # 这条色条给哪个元素上色。可选字段：mappable 没登记成元素（脚本
             # 自己造的 ScalarMappable）时就不发，界面不摆一个指向空处的链接
             mappable_gid = gid_by_artist_id.get(id(artist.cb.mappable))
@@ -4070,6 +4263,13 @@ def _build_manifest(state: FigState, stem: str) -> dict:
         # 路径：它们的 bbox 常常就是整个子图，会把底下热力图 / 位图的点击偷走。
         if el["role"] in ("line", "fill", "patch", "scatter", "collection", "linecoll"):
             geom = pathgeom.element_geometry(artist, W, H, budget)
+            if geom is not None:
+                entry["geometry"] = geom
+        elif el["role"] == "bar_series":
+            # 柱形系列是伪元素（SVG 里没有它的节点），并集 bbox 会把柱与柱之间的
+            # 空白一起罩住——选中一组柱画出来的是一个大矩形，认不出选中的是
+            # 「这几根柱」。逐根描柱，与散点逐颗描 marker 同一取舍。
+            geom = pathgeom.patch_group_geometry(artist.artists, W, H, budget)
             if geom is not None:
                 entry["geometry"] = geom
         # 独立箭头：端点（figure 分数、top-origin）随 manifest 下发，
@@ -4183,6 +4383,9 @@ def _build_manifest(state: FigState, stem: str) -> dict:
         "stem": stem,
         "size_mm": [round(float(w_in) * 25.4, 2), round(float(h_in) * 25.4, 2)],
         "elements": elements,
+        # 本机字体族，整份 manifest 只发一次（理由见 `_family_options`）。
+        # 加字段协议：老前端不认识它会原样忽略，字体下拉照旧只有首选项。
+        "font_families": list(installed_font_families()),
     }
     # 诊断字段：画在图上、却没进元素表的 artist（`census` 在 instrument 里采）。
     # 可选、只在非空时出现——旧前端不认识它会原样忽略，写回自检只比 gid 集合
