@@ -282,8 +282,8 @@ export function AlignmentRow({
   return (
     <Row label={labeledWithState(label, overridden)} labelWidth={labelWidth}>
       <Segmented
-        tone="quiet"
         className="w-full"
+        ariaLabel={label}
         value={value}
         onChange={onChange}
         items={alignmentItems(labels)}
