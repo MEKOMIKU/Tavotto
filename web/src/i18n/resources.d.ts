@@ -542,7 +542,7 @@ export default interface Resources {
         },
         "left-layers": {
           "keywords": "layer structure tc jg tuceng",
-          "label": "打开结构（图层）"
+          "label": "打开图层"
         },
         "load-layout": {
           "keywords": "open load layout zr zairu",
@@ -780,10 +780,10 @@ export default interface Resources {
       "applyToFigure": "应用到当前图…",
       "binding": {
         "builtinDefault": "默认规范",
-        "current": "本项目按「{{name}}」检查",
+        "current": "当前项目使用",
         "globalMissing": "全局清单里已没有这条配置，项目里的快照仍然有效",
         "source": {
-          "builtin": "未绑定，按内置默认",
+          "builtin": "没有指定过，按内置默认检查",
           "global": "跟随全局配置",
           "snapshot": "用的是选择时的快照"
         },
@@ -994,7 +994,8 @@ export default interface Resources {
         "telemetry": {
           "autoProps": "每条记录只带应用版本、操作系统、CPU 架构和安装渠道。",
           "detailsTitle": "会发送哪些数据",
-          "hardDisabled": "本机已由 TAVOTTO_NO_TELEMETRY=1 关闭，此开关无效。",
+          "hardDisabled": "已由本机配置关闭，此开关不可用",
+          "hardDisabledDetail": "环境变量 {{env}} 在起作用；去掉它之后开关才可用",
           "needsReconsent": "采集范围有变化，待重新确认",
           "never": "图、脚本、文件名、路径、科研数据、图内文字与助手提示词。",
           "neverLabel": "绝不发送：",
@@ -1091,6 +1092,8 @@ export default interface Resources {
           }
         },
         "codexIntegrationName": "{{product}} for Codex",
+        "currentDefault": "当前默认",
+        "currentDefaultAria": "{{name}} 是当前默认的编码 Agent",
         "defaultButton": "默认",
         "detail": {
           "addEndpoint": "添加服务…",
@@ -1185,6 +1188,7 @@ export default interface Resources {
         "refreshFailed": "重新检测失败，下面仍是上一次的结果。",
         "rescan": "重新检测",
         "rowAria": "{{name}} 的详情",
+        "setDefault": "设为默认",
         "setDefaultAria": "把 {{name}} 设为默认编码 Agent",
         "source": {
           "chatgpt_bundle": "ChatGPT 应用内置",
@@ -1220,8 +1224,8 @@ export default interface Resources {
         "companionsExplain": "关联元素 = 被你手动摆过位置的标题 / 轴标签 / 图例，以及色条轴与 twinx 的孪生轴。它们要么钉在 figure 坐标上、要么本就是平级的另一个子图，不带的话挪走子图它们会留在原地。关掉就只动子图本身。",
         "diagramOff": "示意：只移动子图，标题与图例留在原地",
         "diagramOn": "示意：拖动子图时，标题与图例跟着一起移动",
-        "dragCompanions": "拖动时一同移动关联对象",
-        "dragCompanionsDesc": "标题、图例等手动摆过位置的对象随子图一起移动",
+        "dragCompanions": "移动子图时，同步移动标题和图例",
+        "dragCompanionsDesc": "也包括色条轴与孪生轴；关掉只动子图本身",
         "more": "画布设置",
         "openCanvasSettings": "打开画布设置"
       },
@@ -1286,6 +1290,9 @@ export default interface Resources {
           "version": "版本"
         },
         "confirm": {
+          "rebuildAction": "重建",
+          "rebuildBody": "会删掉现有环境、新建一个，并按安装记录重装所有包。期间用到它的图无法渲染；已装包的记录不会丢。",
+          "rebuildTitle": "重建这个项目的环境？",
           "uninstallAction": "卸载",
           "uninstallBody": "将从项目环境中移除，用到它的脚本无法渲染。",
           "uninstallBodyDependents": "{{dependents}} 依赖 {{name}}，卸载后它们与相关脚本都将不可用。",
@@ -1303,8 +1310,10 @@ export default interface Resources {
           "notInUse": "本项目当前未使用它",
           "python": "Python {{version}}",
           "ready": "就绪",
-          "rebuild": "重建"
+          "rebuild": "重建环境…",
+          "rebuildDesc": "装坏了就重建：新建环境并按记录重装所有包"
         },
+        "envSection": "环境",
         "envTarget": "装到这里",
         "envTitle": "这个项目的 {{product}} 环境",
         "install": "安装",
@@ -1339,7 +1348,6 @@ export default interface Resources {
           "repair": "缺包时自动修复安装",
           "user": "手动安装"
         },
-        "recoveryNote": "装坏了点「重建」：新建环境并按记录重装所有包。",
         "reinstall": "重新安装",
         "search": {
           "action": "在 PyPI 查找",
@@ -1391,14 +1399,18 @@ export default interface Resources {
         "effectivePath": "实际位置",
         "exportDir": "导出位置",
         "noScriptsSuffix": "（这个项目里的图还不能逐元素编辑）",
+        "onlyThisProject": "只影响这个项目",
         "registry": "管理来源…",
         "scriptCount_other": "{{count}} 个脚本",
         "scripts": "可编辑来源",
+        "sectionLocations": "位置",
+        "sectionProject": "项目",
+        "sectionWriteBack": "写回源图",
         "showFullPath": "显示 {{name}} 的完整路径",
         "switch": "切换项目…",
         "useDefault": "恢复默认",
-        "writeBackOffHint": "已关闭写回：源图与脚本不会被覆盖，「写回原始文件」按钮已停用。",
-        "writeBackOnHint": "修改可直接写入原始脚本。"
+        "writeBackDesc": "「写回原始文件」会覆盖项目里的原始 PDF / PNG 与脚本；每次写回前先把原文件备份到上面的备份位置。",
+        "writeBackOffHint": "已关闭写回：源图与脚本不会被覆盖，「写回原始文件」按钮已停用。"
       },
       "section": {
         "about": "关于与隐私",
@@ -1460,7 +1472,7 @@ export default interface Resources {
         "manualDownload": "连不上更新服务时，也可以去 Releases 手动下载",
         "methodSource": "源码检出（升级请用 git pull）",
         "neverChecked": "尚未检查",
-        "noUpdateAtLastCheck": "{{time}} 检查时没有发现新版本。这是那次检查的结果，不是此刻的发布状态。",
+        "noUpdateAtLastCheck": "上次检查没有发现新版本；此刻有没有，要再查一次才知道。",
         "relaunch": "重启并使用新版本",
         "releaseNotes": "查看发行说明",
         "restartAfter": "后生效——当前进程仍在运行旧版本代码。",
@@ -2076,6 +2088,7 @@ export default interface Resources {
       "readiness_other": "项目里还有 {{count}} 张图没连上脚本",
       "retry": "重新检查",
       "running": "正在检查…",
+      "scopeCountAria": "{{label}}（{{count}} 项）",
       "scopeDocument": "整个文档",
       "scopeFigure": "当前图",
       "scopeFigureTip": "只看「{{name}}」的问题",
@@ -2101,6 +2114,7 @@ export default interface Resources {
       "techProperty": "属性",
       "techRule": "检查项",
       "techTitle": "技术详情",
+      "tierUnverifiable": "无法自动检查",
       "title": {
         "axis-label-format": "坐标轴标题格式不符",
         "bar-without-errorbar": "柱状图没有误差棒",
@@ -2411,6 +2425,8 @@ export default interface Resources {
       "editProp": "修改{{label}}",
       "figureSize": "整图 {{w}}×{{h}} mm",
       "groupFrame": "边框",
+      "groupLine": "线条",
+      "groupMarker": "数据点",
       "groupRangeTransform": "范围与变换",
       "groupTicksGrid": "刻度与网格",
       "hiddenElements_other": "已隐藏元素（{{count}}）",
@@ -2453,8 +2469,8 @@ export default interface Resources {
       "proxiedGeometry": "位置与大小作用于宿主子图「{{label}}」。",
       "proxiedSizeHead": "子图尺寸 · {{label}}",
       "relatedAxes": "所属子图",
-      "relatedLegend": "所属图例",
       "relatedSeries": "所属系列",
+      "relatedTicksAll": "编辑整个 {{label}}…",
       "relatedWithHint": "{{hint}}：{{label}}",
       "resetDiagram": "恢复刻度与边框到脚本",
       "resetElement": "恢复此元素",
@@ -3498,7 +3514,7 @@ export default interface Resources {
       "addAria": "把 {{name}} 添加到画布",
       "addToCanvas": "添加到画布",
       "capabilityHeading": "{{name}} · {{status}}",
-      "cardParameterizable": "可参数化",
+      "cardParameterizable": "可编辑",
       "cardSize": "{{w}}×{{h}} 厘米",
       "cardTitle": "{{id}}\n单击选中 · Enter 编辑原图 · Shift+Enter 添加到画布 · 空格看大图 · 也可直接拖到画布",
       "cardUsed_other": "当前文档已用 {{count}} 次",
@@ -3530,8 +3546,8 @@ export default interface Resources {
       "runtimeNoFile": "这张图来自脚本运行，没有对应的原始图文件。你仍然可以编辑、组图和导出；导出会创建新文件。",
       "runtimeRunAria": "运行 {{script}} 并发现图",
       "runtimeSiblingOf": "同源：{{name}}",
-      "scriptBadgeTitle": "可参数化：由 matplotlib 脚本生成",
-      "scriptOnly": "只看可参数化面板",
+      "scriptBadgeTitle": "可编辑：由 matplotlib 脚本生成，能改图里的内容",
+      "scriptOnly": "只看可编辑的图",
       "search": "搜索面板…",
       "searchAria": "搜索面板",
       "sectionFigures": "图",
@@ -3550,7 +3566,7 @@ export default interface Resources {
       "typeAria": "类型筛选",
       "typeRaster": "图片",
       "typeRuntime": "运行时图",
-      "typeScript": "可参数化",
+      "typeScript": "可编辑",
       "usedChip": "已使用",
       "usedOnly": "已使用",
       "usedOnlyAria": "只看当前文档已使用的素材",
@@ -3668,11 +3684,16 @@ export default interface Resources {
       "isolated": "只看：{{label}}",
       "listLabel": "图内元素",
       "load": "加载元素清单",
+      "locateEditable": "选中一张可编辑的图",
       "lock": "锁定（画布点击跳过）",
       "lockedState": "已锁定",
       "needRender": "「{{name}}」的元素清单需要引擎渲染一次。",
+      "noEditableHint": "由脚本生成的图才能改图内对象；先从素材把它加进画布",
+      "noEditableTitle": "画布上还没有可编辑的图",
       "noMatch": "没有匹配的元素",
-      "noPanelTitle": "选中一个可参数化面板",
+      "noPanelHint": "双击画布上带可编辑标记的图，或从素材里打开它",
+      "noPanelTitle": "选一张可编辑的图，查看图内对象",
+      "openAssets": "打开素材",
       "readonly": "只读",
       "rowActions": "{{label}} 的操作",
       "rowAria": "{{label}}（{{role}}）",
@@ -3802,6 +3823,8 @@ export default interface Resources {
     "layerTree": {
       "collapseGroup": "折叠组",
       "count_other": "{{count}} 个对象",
+      "editableBadge": "可编辑：由脚本生成，双击进入图内编辑",
+      "editableState": "可编辑",
       "emptyTitle": "画布上还没有对象",
       "expandGroup": "展开组",
       "groupAriaWithLayout_other": "组（{{count}} 个对象），{{layout}}",
@@ -3911,7 +3934,7 @@ export default interface Resources {
       "canvases": "画布",
       "collapse": "收起{{label}}",
       "elements": "图内元素",
-      "layers": "结构",
+      "layers": "图层",
       "navLabel": "工作区侧栏",
       "problems": "问题",
       "problemsCount_other": "问题（{{count}}）",
