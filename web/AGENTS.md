@@ -17,11 +17,21 @@
   仓库提交，`--check` 防漂移）照旧；Codex 内嵌画布 `python scripts/build_mcp_widget.py`
   **不再入库**（ADR 0043）——本地构建只为试用，CI 从每次 checkout 现建并验证完整插件，
   两个各改 `web/src` 的 PR 不再为同一份 HTML 相撞。
-- **注释里别写完整的 Tailwind 类名。** 扫描器不分代码和注释：一句文档里出现某个
-  「还没人真用过」的工具类名，它就会被当成用到了，往产物 CSS 里凭空加一条规则
-  （2026-09-03 实测，#210 的 PR 里踩到——一条 e2e 注释给 `canvas.html` 加了一条
-  淡出动画的规则）。要提就写成不成立的形态（`animate-fade-in/out`）或直接用中文
-  描述。画布不再入库，看不到 diff 了——判据换成 CI `plugin-candidate` job 里真起 server 读回
+- **Tailwind 的扫描面 = `web/src`，散文不再被扫**（2026-09-14，issue #322）：`src/index.css`
+  第一行 `@import 'tailwindcss' source('../src')`（路径相对那个 CSS 文件）。此前没有显式声明，
+  Tailwind 按 vite 根自动探测、连 `.md` 与 `e2e/` 一起扫，扫描器又不分代码和注释——一句
+  散文里出现某个「还没人真用过」的工具类名，它就被当成用到了，往产物 CSS 里凭空加一条规则
+  （2026-09-03 #210 的 PR：一条 e2e 注释给 `canvas.html` 加了一条淡出动画的规则；#319 反证时
+  又量到本文件的一句话独自吊着一条规则）。现在 `.md` / `e2e/` / `scripts/` / 三个 HTML 入口
+  都在面外，文档可以正常写类名。**`web/src` 里的代码注释仍在面内**（含 `*.test.tsx`），
+  那里的完整类名照样会进产物（`ui/Checkbox.tsx` 注释里的 `accent-ink-2` 就是活例）——
+  要提就写成不成立的形态或用中文描述。三条构建链共用这一份 CSS，声明一次三份产物都收窄。
+  门禁 `scripts/tailwind-scan-check.mjs` 接在 `pnpm build` 后、读产物 CSS，两向各一条：
+  正向抽 11 处真实用法（字面量 / 模板字符串 / 变体 / 任意值 / `@utility` / 主题 token）必须在；
+  反向靠一只**常驻在本文件里的金丝雀**——`tracking-widest` 是产品里没人用的真实工具类，
+  它只出现在这段散文里，产物里**不许**有它的规则；本文件里这个词被删掉时门禁同样红（少了
+  输入的反向判据恒真）。哪天产品真要用它，换一只并把脚本里的 `CANARY` 一起换。
+  画布不再入库，看不到 diff 了——判据换成 CI `plugin-candidate` job 里真起 server 读回
   的资源与构建物逐字相同；想本地对比就构建两次到不同 `--out` 再 diff。
 - 界面用 agent-browser 实测；黄金路径 E2E `cd web && pnpm e2e`（Playwright，
   先 `python scripts/build_frontend.py`）。`e2e/mcp-canvas.spec.ts` 还要
@@ -709,9 +719,15 @@ lib/typography.ts          规范属性名 · 取值语义 · 能力表 · prope
   那一页的安装按钮作用在当前项目上。**代际与 `lookupSeq` 是两条轴，不许合并**：序号答
   「同一个项目里哪一次最新」，代际答「这个响应属于哪个项目」——只有序号的话，A 那次
   查找在 B 里仍然是最新的一次，照样落地。`clear()` 只换代、**不动 `lookupSeq`**：两条
-  保证各由一条判据负责，做两遍的话拆掉其中一遍会照样全绿。`progress` 与已起过的作业号
-  刻意不清（作业改的是旧项目的环境、还在后端跑，`job_id` 是唯一的把手；与导出作业 /
-  native 会话同一条纪律）。看护 `store/projectSwitchPackages.test.ts`（6 条）。
+  保证各由一条判据负责，做两遍的话拆掉其中一遍会照样全绿。**作业不清、但按所属项目分格**
+  （issue #309）：作业改的是旧项目的环境、还在后端跑，`job_id` 是唯一的把手，与导出作业 /
+  native 会话同一条纪律；「B 的页面上不该出现 A 的进度条与取消按钮」靠作业自带项目字段
+  解决——`run()` 记下起它那一刻的 `currentProjectId()`，进度落进 `jobs[所属项目]`，界面只读
+  `progressFor(currentProjectId())`，`cancel` / `poll` 只问当前项目的作业，终态副作用
+  （刷清单 / 环境 / 渲染重排 / 错误文案）只在**此刻开着的就是作业所属项目**时派发。
+  `engine.package` 的 SSE 事件**不带 pj**，`handleServerEvent` 顶上那道按项目的闸对它不起作用，
+  所以这一层非做不可。看护 `store/projectSwitchPackages.test.ts`（12 条：查找 6 + 作业 6，
+  含「作业属于当前项目时终态照常派发」的对照——没有它，「B 上 0 次」会因为从没人触发而恒绿）。
 * **设置里的说明先改控件，改不动才加帮助**（2026-09-06 审计「说明文字专项补查」）：优先级是
   命名 → 单位 → 对象关系 → 状态 → 条件展开。`SettingRow` 的 `description` 是标签底下的一行短
   说明（改的是什么、影响哪里），`status` 只在那个状态**真的成立**时出现（「当前窗口只能固定
@@ -802,11 +818,10 @@ lib/typography.ts          规范属性名 · 取值语义 · 能力表 · prope
   - **`data-dialog-close` = 对话框右上角的关闭按钮**（同一个文件的 `RD.Close`）。
     它的 `aria-label` 是 `actions.close` 的译文，换语言就选不中。
   - **`data-overlay-svg` = 画布覆盖层 SVG**（`canvas/OverlaySvg.tsx`）：选中描示、参考线、
-    手柄都画在它里面。以前拿那个「不吃指针事件」的工具类（`pointer-events` 加 `-none`）
-    当选择器——CSS class 是排版手段不是标识。**这里和 `OverlaySvg.tsx` 的注释里都刻意
-    不写出完整类名**：Tailwind 的扫描器正则扫文本、连 `.md` 也扫（实测：把 `web/src`
-    里 40 处真实用法全中和掉之后，产物里那条规则仍然被本行吊着），真实用法删光了
-    规则还会留在产物里。
+    手柄都画在它里面。以前拿那个「不吃指针事件」的工具类 `pointer-events-none` 当选择器
+    ——CSS class 是排版手段不是标识。本文件从 2026-09-14 起可以写出完整类名（扫描面收到
+    `web/src`，见「验证」一节）；`OverlaySvg.tsx` 里那段注释**仍然**拆着写——它是 `.tsx`、
+    在面内，实测把 `web/src` 里 40 处真实用法全中和掉之后，一句注释就能把规则吊在产物里。
   - **`data-inspector-panel` = 右侧检查器栏**（`components/inspector/Inspector.tsx` 的 `aside`）：
     左抽屉（`data-left-drawer`）、版本面板、快捷任务卡也都是 `aside`。
   - **`data-prop` = 属性字段行**（`inspector/ElementInspector.tsx` 的 `FieldBlock`、
