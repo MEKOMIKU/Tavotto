@@ -3,6 +3,7 @@ import { ArrowLeft, Info, Plus } from 'lucide-react'
 import { ICON_SIZE } from '@/components/ui/Icon'
 import { t as translate } from '@/i18n'
 import { Button } from '@/components/ui/Button'
+import { untruncatedLabel } from '@/components/inspector/identityCrumbs'
 import { engineLabel, roleName } from '@/components/inspector/roles/registry'
 import { reasonText, statusLabel } from '@/lib/readinessText'
 import { useAssetStore } from '@/store/assetStore'
@@ -41,6 +42,11 @@ export function WorkspaceContextBar() {
   const activePanelId = useWorkspaceStore((s) => s.activePanelId)
   const elementPanelId = useUiStore((s) => s.elementPanelId)
   const selectedGids = useUiStore((s) => s.selectedGids)
+  // <1024 的覆盖式侧栏压在画布上：浮条按剩下的宽度居中，别让「添加到画布」与 Esc 出口
+  // 被右栏盖住（2026-09-14 审计 A9；停靠布局下侧栏不在画布区里，不用让）
+  // 左抽屉绝对定位在轨道右侧，画布列从轨道右缘起：抽屉盖住画布的宽度就是 leftWidth
+  const overlayLeft = useUiStore((s) => (s.layout === 'narrow' && s.leftOpen ? s.leftWidth : 0))
+  const overlayRight = useUiStore((s) => (s.layout === 'narrow' && s.rightOpen ? s.rightWidth : 0))
   // 「编辑原图」这一次把图加进了文档（此前不在）：常驻一行说明，回排版即消失
   const justAdded = useWorkspaceStore(
     (s) => s.addedForEdit !== null && s.addedForEdit === s.activePanelId,
@@ -71,7 +77,7 @@ export function WorkspaceContextBar() {
       : selectedGids.length === 0
         ? roleName('figure')
         : element
-          ? engineLabel(element.label)
+          ? engineLabel(untruncatedLabel(element.label, fullTextOf(element)))
           : null
 
   /**
@@ -89,7 +95,10 @@ export function WorkspaceContextBar() {
   }
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-2 z-30 flex justify-center px-1">
+    <div
+      className="pointer-events-none absolute inset-x-0 top-2 z-30 flex justify-center px-1"
+      style={overlayLeft || overlayRight ? { paddingLeft: overlayLeft + 4, paddingRight: overlayRight + 4 } : undefined}
+    >
       {/* 宽度按内容量：`w-max` = 内容的 max-content，面包屑因此拿到自然宽度、
           完整显示，不会被 flex 压出省略号。**别再写死宽度**——写死 42rem 时浮条
           比窄画布还宽，居中后两端被裁掉，看起来同样是「显示不全」。真的宽于画布
@@ -199,4 +208,10 @@ export function WorkspaceContextBar() {
       </nav>
     </div>
   )
+}
+
+/** 名字里被引擎截到 18 字的那段用户文字的全文：文字元素的 `text`、系列的 `label`（与右栏头部同一判据） */
+function fullTextOf(el: { editable: { prop: string; value: unknown }[] }): string | undefined {
+  const v = el.editable.find((f) => f.prop === 'text' || f.prop === 'label')?.value
+  return typeof v === 'string' ? v : undefined
 }
