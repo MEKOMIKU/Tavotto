@@ -52,8 +52,9 @@ const radios = () => Array.from(document.querySelectorAll<HTMLElement>('[role="r
  * 它的断言全是恒真。
  */
 const openLineStyle = async (label = '线型') => {
+  // 触发器与 MarkerPicker 同一副（Radix Popover.Trigger 给它 aria-haspopup="dialog"）
   const trigger = document.querySelector<HTMLButtonElement>(
-    `button[aria-haspopup="listbox"][aria-label="${label}"]`,
+    `button[aria-haspopup="dialog"][aria-label="${label}"]`,
   )
   expect(trigger, '线型触发按钮不见了').toBeTruthy()
   await act(async () => {
@@ -113,6 +114,27 @@ describe('LineStylePicker', () => {
       )
     })
     expect(onChange).toHaveBeenCalledWith('--')
+  })
+
+  it('方向键漫游不收起弹层；点选（click / Enter）才收起，焦点回到触发器', async () => {
+    const onChange = vi.fn()
+    await mount(
+      <LineStylePicker value="-" options={['-', '--', ':', '-.']} onChange={onChange} ariaLabel="线型" />,
+    )
+    await openLineStyle()
+    const group = () => document.querySelector('[role="radiogroup"][aria-label="线型"]')
+    await act(async () => {
+      group()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+    })
+    // 漫游即选中（radiogroup 契约），但弹层还开着——连续按方向键要能继续走
+    expect(onChange).toHaveBeenCalledWith('--')
+    expect(group()).toBeTruthy()
+    await act(async () => {
+      radioByLabel('点线')!.click()
+    })
+    expect(onChange).toHaveBeenLastCalledWith(':')
+    // 点选之后弹层收起
+    expect(group()).toBeNull()
   })
 })
 
