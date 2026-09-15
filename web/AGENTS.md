@@ -1593,7 +1593,11 @@ Tailwind 自带的 xl 以上已清空。UI 字号 11-14px（`xs/sm/base/lg`）�
 （`bg-ink`）；按钮四档 primary / secondary / ghost / danger；蓝色只用于选择 / 焦点 / 链接；
 每个上下文最多一个填色主动作（顶栏=导出、助手=发送、弹窗=确认）。禁用态一档 `opacity-40 +
 cursor-not-allowed`；未选中复选框 / 单选边框与关态开关轨道 `border-control`（≥3:1）；焦点环
-`focus-ring` 不透明。**键盘契约在原语里**（2026-09-14 apple-design 审计批次 1）：Dialog 打开后焦点
+`focus-ring` 不透明。**跟着选中项走的指示物只有一份实现**（2026-09-14 二审 E2 / E3）：Tabs 的下划线与 Segmented 的选中底
+由 `ui/slidingIndicator` 滑动（jsdom 量不到几何，用例要自己给 `offsetLeft / offsetWidth` 装值）；折叠
+分组的展开走 `ui/Field.Reveal`（`usePresence` 保活退场那 90ms，所以收起后内容还在 DOM 里一小会儿）；
+没写时长的 `transition-*` 默认就是 `--duration-fast` + `--ease-standard`（`motion.test` 守着）。
+**键盘契约在原语里**（2026-09-14 apple-design 审计批次 1）：Dialog 打开后焦点
 在容器、关闭钮 DOM 排最后；Segmented / Tabs 一个 Tab 停靠点 + 方向键；`keyboardPrimitives.test`
 与 `foundation.test`（`role="radio"` / `aria-haspopup` / disabled 写法 / `ring-accent/N`）守着。
 **可编辑框只有一副**（`ui/fieldBox.ts`：白底 + `border-input`；TextInput / NumberField / Select / SearchInput /
@@ -1634,8 +1638,9 @@ EmptyState。**同类控件出现第二套实现先删第二套，不给新写�
 右=缩放/导出/更多）；左侧 44px 常驻图标轨道（素材/结构/图内元素）+
 280–360px 上下文抽屉（再点收起）；右栏 296–320px 三模式（属性/改图助手/
 画布），无选择且未钉住时不占位；断点 ≥1440 双栏可钉住、1024–1439 左右
-互斥、<1024 覆盖式抽屉。底部无常驻状态栏：坐标/选区尺寸只在拖动中出现，
-普通状态走短暂 toast，错误常驻可关，autosave 显示在顶栏文档名旁。
+互斥、<1024 覆盖式抽屉。底部无常驻状态栏：坐标/选区尺寸只在拖动中出现（HUD，左下），
+通知只有一条轨（`NotificationRail`，底部居中、最多两条叠着）：普通状态短暂即逝、错误常驻可关、
+操作提示可关、「已为编辑加入本文档」带撤销；autosave 显示在顶栏文档名旁。
 
 **图标**（2026-09-06，用户反馈第 7 条；细则 `docs/ux/ICONOGRAPHY.md`）：全产品只有
 lucide-react 一套；尺寸四档 `ICON_SIZE.{xs,sm,md,lg}` = 12 / 14 / 16 / 20，默认 sm，

@@ -35,7 +35,6 @@ typography:
     fontSize: "12px"
     fontWeight: 500
     lineHeight: "16px"
-    letterSpacing: "0.06em"
   body:
     fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', system-ui, sans-serif"
     fontSize: "12px"
@@ -56,6 +55,11 @@ typography:
     fontSize: "11px"
     fontWeight: 400
     lineHeight: "15px"
+  number:
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', system-ui, sans-serif"
+    fontSize: "12px"
+    fontWeight: 400
+    lineHeight: "16px"
   mono:
     fontFamily: "ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace"
 rounded:
@@ -182,7 +186,8 @@ Badge、Tabs、listRowClass / TreeRow、SearchInput、Notice、Section / Disclos
 disabled 统一 `opacity-35~40 + cursor-not-allowed`。图标只有 lucide 一套（`docs/ux/ICONOGRAPHY.md`）。
 
 动效：**宪法第七节**。时长只来自 token（fast 120 / base 180 / slow 240 / exit 90），
-进场 `--ease-pop`、退场 `--ease-exit`；`prefers-reduced-motion` 是硬约束。
+进场 `--ease-pop`、退场 `--ease-exit`、其余 `--ease-standard`；没写时长的 `transition-*` 默认
+就是 fast + standard（`--default-transition-*`）；`prefers-reduced-motion` 是硬约束。
 
 ## Do's and Don'ts
 

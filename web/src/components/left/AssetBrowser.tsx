@@ -47,7 +47,7 @@ import { Button, IconButton } from '../ui/Button'
 import { EmptyState } from '../ui/EmptyState'
 import { Dialog } from '../ui/Dialog'
 import { Popover } from '../ui/Popover'
-import { Row } from '../ui/Field'
+import { Reveal, Row } from '../ui/Field'
 import { SearchInput } from '../ui/SearchInput'
 import { Select } from '../ui/Select'
 import { Toggle } from '../ui/Toggle'
@@ -451,7 +451,7 @@ export function AssetBrowser() {
         title={zoomed ? (zoomed.kind === 'file' ? fileName(zoomed.panel.id) : zoomed.kind === 'runtime' ? zoomed.asset.stem : '') : ''}
         description={
           zoomed?.kind === 'file'
-            ? `${formatOf(zoomed.panel)} · ${formatCm(zoomed.panel.native_w_mm)}×${formatCm(zoomed.panel.native_h_mm)}cm`
+            ? `${formatOf(zoomed.panel)} · ${translate('measure.cmSize', { w: formatCm(zoomed.panel.native_w_mm), h: formatCm(zoomed.panel.native_h_mm) })}`
             : zoomed?.kind === 'runtime'
               ? `${ab('runtimeBadge')} · ${zoomed.asset.script}`
               : ''
@@ -1252,15 +1252,15 @@ function FolderInfo({ dir, shown, total }: { dir: string; shown: number; total: 
         className="flex w-full items-center gap-1 rounded-sm text-left text-xs text-ink-3 outline-none hover:text-ink-2 focus-visible:focus-ring"
       >
         {ab('folderInfo')}
-        <span className="ml-auto font-mono">
+        <span className="ml-auto tabular-nums">
           {shown === total ? total : `${shown} / ${total}`}
         </span>
       </button>
-      {open && (
+      <Reveal open={open}>
         <p className="mt-1 break-all font-mono text-xs text-ink-3" title={dir}>
           {dir}
         </p>
-      )}
+      </Reveal>
     </div>
   )
 }

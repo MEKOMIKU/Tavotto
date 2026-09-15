@@ -350,7 +350,7 @@ function TextContentRow({
         ref={taRef}
         // 与属性页那格同一个名字：都是 `text` 这条属性的显示名
         aria-label={propLabel('text')}
-        rows={Math.min(3, text.split('\n').length)}
+        maxRows={3}
         value={text}
         onChange={(e) => write('text', e.target.value, false)}
         onKeyDown={(e) => {
@@ -418,7 +418,7 @@ function GeomControls({
       <Button size="icon-sm" aria-label={qe('scaleUp')} onClick={() => scale(1.05)}>
         <Plus size={ICON_SIZE.sm} />
       </Button>
-      <span className="ml-auto shrink-0 font-mono text-xs tabular-nums text-ink-3">
+      <span className="ml-auto shrink-0 text-xs tabular-nums text-ink-3">
         {qe('widthShare', { percent: Math.round(pos[2] * 100) })}
       </span>
     </Line>
