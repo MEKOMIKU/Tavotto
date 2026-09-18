@@ -11,7 +11,6 @@ worker 在此转换为各 artist 自己的坐标系。
 from __future__ import annotations
 
 import contextlib
-import importlib
 import inspect
 import math
 import os
@@ -40,35 +39,11 @@ from matplotlib.text import Text
 from matplotlib.ticker import FormatStrFormatter, ScalarFormatter
 from mpl_toolkits.mplot3d import proj3d
 
+import spinemodel
+from axestraversal import ordered_axes
+
 #: 刻度标签的 gid 形状（`FigState.resolve` 按需现解时用）
 _TICKLABEL_GID = re.compile(r"^axes_(\d+)\.([xyz])ticklabels_(\d+)$")
-
-
-def _sibling(name: str):
-    """按**本模块自己的加载位置**解析兄弟模块（唯一用途：`manifest`）。
-
-    `manifest` 在模块层 import 本模块，反过来在模块层 import 会成环，所以
-    那两处只能延后到调用时——问题是**延后到什么时候执行、在谁的命名空间里
-    执行**，两条入口的答案不一样：
-
-    * safe worker 把 engine 目录插进 `sys.path` 后平铺 import
-      （`__name__ == "overrides"`），裸 `import manifest` 命中的是我们自己的；
-    * native bridge（ADR 0020）在**用户自己的进程**里跑用户的代码，engine
-      目录**必须**在 import 完就从 `sys.path` 收回——否则用户项目里那份
-      `manifest.py` / `overrides.py` / `config.py` 会被我们顶掉。此时
-      `__name__ == "tavotto_bridge_runtime.overrides"`，而这两处 late import
-      是在**用户代码跑起来之后**才执行的：裸 `import manifest` 会去命中
-      用户项目里的 `manifest.py`，然后报一个指向完全错误方向的
-      AttributeError。
-
-    按 `__name__` 的包前缀解析对两条入口都成立，且平铺那条**一个字节都没变**
-    （前缀为空 → 仍然是裸名 `manifest`）。看护：
-    `tests/bridge/test_bridge_namespace.py::test_user_module_wins_over_engine_sibling`。
-    """
-    pkg = __name__.rpartition(".")[0]
-    full = f"{pkg}.{name}" if pkg else name
-    mod = sys.modules.get(full)
-    return mod if mod is not None else importlib.import_module(full)
 
 
 class FigState:
@@ -119,17 +94,12 @@ class FigState:
         if m is None:
             return None
         i, which, j = int(m.group(1)), m.group(2), int(m.group(3))
-        # **序号是 `_ordered_axes` 编的**，它在 `len(fig.axes)` 之后继续给子
-        # axes 编号。拿 `fig.axes` 去索引，插图的刻度文字 gid 会越界 → 回 None
+        # **序号是 `axestraversal.ordered_axes` 编的**，它在 `len(fig.axes)` 之后继续
+        # 给子 axes 编号。拿 `fig.axes` 去索引，插图的刻度文字 gid 会越界 → 回 None
         # → apply 报「元素不存在」，而**一条 warning 就阻断写回**。
         # 这条只在索引里还没有它时才走到（CLAUDE.md 记的「先改刻度定位、再改
         # 新出现的那条刻度」在全量重放里的情形），但那正是写回那条路。
-        # late import：manifest 在模块层 import 本模块，反过来会成环。
-        # **不能写成裸 `import manifest`**——native bridge 里那会命中用户项目
-        # 自己的 manifest.py，理由见 `_sibling`。
-        _ordered_axes = _sibling("manifest")._ordered_axes
-
-        axes = _ordered_axes(self.fig)[0]
+        axes = ordered_axes(self.fig)[0]
         if not 0 <= i < len(axes):
             return None
         ax = axes[i]
@@ -1303,92 +1273,6 @@ def _grid_prop(read, default):
     return g
 
 
-def _spines_get(ax: Axes, fn, default):
-    sp = ax.spines.get("left") or next(iter(ax.spines.values()), None)
-    return fn(sp) if sp is not None else default
-
-
-# ---------------------------------------------------------------------------
-# 边框（spine）模型：一档「全部」+ 四条可各自覆盖
-#
-# 与刻度模型同一套路数（写进 cfg 再**整体重建**），原因也一样：「全部边框改成
-# 灰色」与「只把上边框改成红色」是两条会互相盖写的 setter，谁先谁后就会得到
-# 两张不同的图。改成一次重建之后，两者的应用顺序不影响结果——热会话与全量
-# 重放才收敛。
-#
-# 优先级：某一条自己的设定 > 「全部」的设定 > 脚本原样。
-# 「全部」这一档故意作用于 `ax.spines` 的**每一条**（含色条轴的 'outline'）——
-# 那是它原本的口径，收窄成四条会让色条的外框突然改不动了。
-# ---------------------------------------------------------------------------
-_SPINE_SIDES = ("top", "right", "bottom", "left")
-_SPINE_CFG_KEYS = (
-    "all_color",
-    "all_width",
-    *(f"{s}_{k}" for s in _SPINE_SIDES for k in ("color", "width")),
-)
-
-
-def spine_cfg(ax: Axes) -> dict:
-    """取（必要时新建）一条 axes 的边框模型缓存。`instrument` 在 build 之后
-    对每个 2D axes 调一次，保证 `orig` 采的是**脚本原样**。"""
-    cfg = getattr(ax, "_mm_spine_cfg", None)
-    if cfg is None:
-        cfg = {k: None for k in _SPINE_CFG_KEYS}
-        cfg["orig"] = {
-            name: (sp.get_edgecolor(), float(sp.get_linewidth())) for name, sp in ax.spines.items()
-        }
-        ax._mm_spine_cfg = cfg  # noqa: SLF001
-    return cfg
-
-
-def apply_spine_model(ax: Axes) -> None:
-    """按 cfg **整体重建**每一条边框的颜色与线宽。"""
-    cfg = spine_cfg(ax)
-    for name, sp in ax.spines.items():
-        orig = cfg["orig"].get(name)
-        if orig is None:
-            continue
-        color = cfg.get(f"{name}_color")
-        if color is None:
-            color = cfg["all_color"]
-        width = cfg.get(f"{name}_width")
-        if width is None:
-            width = cfg["all_width"]
-        sp.set_edgecolor(orig[0] if color is None else color)
-        sp.set_linewidth(orig[1] if width is None else float(width))
-    ax.stale = True
-
-
-def spine_all_color(ax: Axes):
-    cfg = spine_cfg(ax)
-    if cfg["all_color"] is not None:
-        return cfg["all_color"]
-    return _spines_get(ax, lambda s: s.get_edgecolor(), (0, 0, 0, 1))
-
-
-def spine_all_width(ax: Axes) -> float:
-    cfg = spine_cfg(ax)
-    if cfg["all_width"] is not None:
-        return float(cfg["all_width"])
-    return float(_spines_get(ax, lambda s: float(s.get_linewidth()), 0.8))
-
-
-def spine_side_color(ax: Axes, side: str):
-    cfg = spine_cfg(ax)
-    if cfg[f"{side}_color"] is not None:
-        return cfg[f"{side}_color"]
-    sp = ax.spines.get(side)
-    return sp.get_edgecolor() if sp is not None else spine_all_color(ax)
-
-
-def spine_side_width(ax: Axes, side: str) -> float:
-    cfg = spine_cfg(ax)
-    if cfg[f"{side}_width"] is not None:
-        return float(cfg[f"{side}_width"])
-    sp = ax.spines.get(side)
-    return float(sp.get_linewidth()) if sp is not None else spine_all_width(ax)
-
-
 def _set_legend_fontsize(leg, value) -> None:
     """图例字号：标量作用于每一条，序列逐条对应（多余的忽略、缺的沿用最后一个）。
 
@@ -1405,28 +1289,6 @@ def _set_legend_fontsize(leg, value) -> None:
     size = float(value)
     for t in texts:
         t.set_fontsize(size)
-
-
-def _mk_spine_handler(key: str, read):
-    def g(ax: Axes):
-        return read(ax)
-
-    def s(ax: Axes, v) -> None:
-        spine_cfg(ax)[key] = v
-        apply_spine_model(ax)
-
-    return (g, s)
-
-
-def _mk_spine_restore(key: str):
-    """撤销一条边框设定 = **退回未表态**（落回「全部」那一档，或脚本原样），
-    不是把当前推断出来的值钉死成一条显式配置。"""
-
-    def r(ax: Axes, _orig) -> None:
-        spine_cfg(ax)[key] = None
-        apply_spine_model(ax)
-
-    return r
 
 
 def _tick_axis(ts: "TickSet"):
@@ -2144,18 +2006,6 @@ def _mk_set_invert(which: str):
 def _set_aspect(a: Axes, v) -> None:
     v = str(v)
     a.set_aspect(v if v in ("auto", "equal") else float(v))
-
-
-def _mk_spine_get(name: str):
-    return lambda a: bool(a.spines[name].get_visible()) if name in a.spines else True
-
-
-def _mk_spine_set(name: str):
-    def s(a: Axes, v) -> None:
-        if name in a.spines:
-            a.spines[name].set_visible(bool(v))
-
-    return s
 
 
 def _set_image_origin(im: AxesImage, v) -> None:
@@ -2962,7 +2812,7 @@ def colorbar_maps(fig, axes) -> tuple[dict, dict]:
     新矩形**。实测：翻成横向之后色条轴仍是 `0.116 × 0.77` 的竖条（有宿主的
     对照是 `0.462 × 0.116`），一根横色条被塞在竖框里，全程无报错。
 
-    `axes` **要传 `manifest._ordered_axes(fig)[0]`**，别让它退回 `fig.axes`：
+    `axes` **要传 `axestraversal.ordered_axes(fig)[0]`**，别让它退回 `fig.axes`：
     `ax.inset_axes()` 的宿主只存在于 `child_axes` 里，扫不到它就扫不到它身上的
     mappable，于是那条色条**整个不被认出来**。后果不是「少一个元素」：
 
@@ -3034,7 +2884,7 @@ def follow_map(fig, cbar_of_ax: dict, host_of_cbax: dict, axes) -> dict[str, lis
     判据本身只有 `coincident_shared_axes_pairs` 一份（manifest 的孪生轴
     标签也吃它，别再写第二份）。
     """
-    # **编号与遍历都必须用 `_ordered_axes`**（由调用方传进来）。用 `fig.axes`
+    # **编号与遍历都必须用 `axestraversal.ordered_axes`**（由调用方传进来）。用 `fig.axes`
     # 的话，插图宿主不在里面 → `gid_of_ax.get(host)` 是 None → `link()` 直接
     # 返回，这条随行关系**被无声丢掉**。实测
     # `fig.colorbar(im, ax=ax.inset_axes(...))`：`colorbar_maps` 认出来了、
@@ -3074,7 +2924,7 @@ def coincident_shared_axes_pairs(ordered, cbar_of_ax) -> list[tuple]:
     定下的裁决），顺带把 `fig.add_axes(同位置, sharex=…)` 手搓出来的孪生
     也认进来——它们与 `twinx()` 在用户眼里是同一个东西。
 
-    对 (ax, other) 双向各出现一次；按 `ordered`（`_ordered_axes` 的遍历序）
+    对 (ax, other) 双向各出现一次；按 `ordered`（`axestraversal.ordered_axes` 的遍历序）
     枚举而不是遍历 siblings 集合：集合序不稳定，manifest 要逐字节可复现
     （写回校验拿它比对）。
     """
@@ -3101,12 +2951,7 @@ def _refresh_axes_follow(state: "FigState") -> None:
     """结构改造之后重算随行关系（色条方向翻转会改变谁和谁挨着）。"""
     try:
         # 与 `instrument` 同一条遍历（插图里的宿主不在 `fig.axes` 里）。
-        # 这里靠 late import 拿 `_ordered_axes`：manifest 在模块层 import
-        # overrides，反过来在模块层 import 会成环。**不能写成裸 import**，
-        # 理由见 `_sibling`。
-        _ordered_axes = _sibling("manifest")._ordered_axes
-
-        _ordered = _ordered_axes(state.fig)[0]
+        _ordered = ordered_axes(state.fig)[0]
         cbar_of_ax, host_of_cbax = colorbar_maps(state.fig, _ordered)
         state.colorbar_axes = set(cbar_of_ax)
         state.axes_follow = follow_map(state.fig, cbar_of_ax, host_of_cbax, _ordered)
@@ -3628,9 +3473,9 @@ def _legend_replace_handle(leg: Legend, k: int, orig, copy_of=None) -> bool:
 
 def _all_legends(fig) -> list[Legend]:
     """figure 上全部图例：figure 级的 + 每个 axes 的（含插图 / 次坐标轴——
-    `fig.axes` 里没有它们，遍历权威只有 `manifest._ordered_axes` 一处）。"""
+    `fig.axes` 里没有它们，遍历权威只有 `axestraversal.ordered_axes` 一处）。"""
     out = list(getattr(fig, "legends", []) or [])
-    for ax in _sibling("manifest")._ordered_axes(fig)[0]:  # noqa: SLF001
+    for ax in ordered_axes(fig)[0]:
         leg = ax.get_legend()
         if leg is not None:
             out.append(leg)
@@ -4763,30 +4608,7 @@ HANDLERS: dict[tuple[str, str], tuple] = {
     ("axes", "invert_x"): (lambda a: bool(a.xaxis_inverted()), _mk_set_invert("x")),
     ("axes", "invert_y"): (lambda a: bool(a.yaxis_inverted()), _mk_set_invert("y")),
     ("axes", "aspect"): (lambda a: a.get_aspect(), _set_aspect),
-    ("axes", "spine_top_color"): _mk_spine_handler(
-        "top_color", lambda a, _s="top": spine_side_color(a, _s)
-    ),
-    ("axes", "spine_top_linewidth"): _mk_spine_handler(
-        "top_width", lambda a, _s="top": spine_side_width(a, _s)
-    ),
-    ("axes", "spine_right_color"): _mk_spine_handler(
-        "right_color", lambda a, _s="right": spine_side_color(a, _s)
-    ),
-    ("axes", "spine_right_linewidth"): _mk_spine_handler(
-        "right_width", lambda a, _s="right": spine_side_width(a, _s)
-    ),
-    ("axes", "spine_bottom_color"): _mk_spine_handler(
-        "bottom_color", lambda a, _s="bottom": spine_side_color(a, _s)
-    ),
-    ("axes", "spine_bottom_linewidth"): _mk_spine_handler(
-        "bottom_width", lambda a, _s="bottom": spine_side_width(a, _s)
-    ),
-    ("axes", "spine_left_color"): _mk_spine_handler(
-        "left_color", lambda a, _s="left": spine_side_color(a, _s)
-    ),
-    ("axes", "spine_left_linewidth"): _mk_spine_handler(
-        "left_width", lambda a, _s="left": spine_side_width(a, _s)
-    ),
+    **spinemodel.HANDLERS_STYLE,
     ("axes", "facecolor"): (lambda a: a.get_facecolor(), lambda a, v: a.set_facecolor(v)),
     ("axes", "grid_x"): (
         lambda a: _grid_visible(a, "x"),
@@ -4819,14 +4641,8 @@ HANDLERS: dict[tuple[str, str], tuple] = {
     ("axes", "ticks_top"): _mk_tick_side("x", "top", 2),
     ("axes", "ticks_left"): _mk_tick_side("y", "left", 1),
     ("axes", "ticks_right"): _mk_tick_side("y", "right", 2),
-    ("axes", "spine_top"): (_mk_spine_get("top"), _mk_spine_set("top")),
-    ("axes", "spine_right"): (_mk_spine_get("right"), _mk_spine_set("right")),
-    ("axes", "spine_bottom"): (_mk_spine_get("bottom"), _mk_spine_set("bottom")),
-    ("axes", "spine_left"): (_mk_spine_get("left"), _mk_spine_set("left")),
-    # 边框颜色 / 线宽走「模型」：一档「全部」+ 四条各自可覆盖，
-    # 应用顺序不影响结果（见上方 apply_spine_model 的注释）
-    ("axes", "spine_color"): _mk_spine_handler("all_color", spine_all_color),
-    ("axes", "spine_linewidth"): _mk_spine_handler("all_width", spine_all_width),
+    # 边框显隐 + 颜色 / 线宽的「全部」档（模型在 spinemodel，应用顺序不影响结果）
+    **spinemodel.HANDLERS_VISIBILITY,
     # ---- axes3d: 视角 / 网格（manifest 只对 3D 轴放出这些字段）----
     ("axes", "elev"): (_view3d_get("elev"), _view3d_set("elev")),
     ("axes", "azim"): (_view3d_get("azim"), _view3d_set("azim")),
@@ -5207,16 +5023,7 @@ _RESTORE: dict[tuple[str, str], object] = {
 }
 for _p in _TICK_MODEL_PROPS:
     _RESTORE[("ticks", _p)] = _mk_tick_model_restore(_p)
-for _prop, _key in [
-    ("spine_color", "all_color"),
-    ("spine_linewidth", "all_width"),
-    *[
-        (f"spine_{_s}_{_n}", f"{_s}_{_k}")
-        for _s in _SPINE_SIDES
-        for _n, _k in (("color", "color"), ("linewidth", "width"))
-    ],
-]:
-    _RESTORE[("axes", _prop)] = _mk_spine_restore(_key)
+_RESTORE.update(spinemodel.RESTORE)
 # ---------------------------------------------------------------------------
 # 背景框（bbox_*）：六条 prop 写的是**同一个 patch**，而那个 patch 可能是被
 # 第一条 override 现建出来的。所以 handler 与 restore 必须成对登记——
