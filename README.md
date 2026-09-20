@@ -1,26 +1,4 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/Tavotto/Tavotto/main/assets/readme/hero.svg" width="100%"
-       alt="Tavotto — a visual editor for matplotlib and AI-generated scientific figures. Edit figures visually. Keep scripts untouched.">
-</p>
 
-<p align="center">
-  <b>English</b> · <a href="https://github.com/Tavotto/Tavotto/blob/main/README.zh-CN.md">简体中文</a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/Tavotto/Tavotto/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Tavotto/Tavotto?style=flat-square&color=2868b7&labelColor=1b1b18"></a>
-  <a href="https://pypi.org/project/tavotto/"><img alt="PyPI" src="https://img.shields.io/pypi/v/tavotto?style=flat-square&color=2868b7&labelColor=1b1b18"></a>
-  <a href="https://github.com/Tavotto/Tavotto/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Tavotto/Tavotto/ci.yml?branch=main&style=flat-square&labelColor=1b1b18"></a>
-  <a href="https://github.com/Tavotto/Tavotto/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-AGPL--3.0--only-1b1b18?style=flat-square&labelColor=1b1b18"></a>
-  <img alt="Python" src="https://img.shields.io/badge/python-3.10%20–%203.14-1b1b18?style=flat-square&labelColor=1b1b18">
-</p>
-
-<p align="center">
-  <a href="https://github.com/Tavotto/Tavotto/releases/latest"><b>Download</b></a> ·
-  <a href="#get-started">Get started</a> ·
-  <a href="#what-you-can-edit-inside-a-figure">What you can edit</a> ·
-  <a href="#export-for-publication">Publication checks</a>
-</p>
 
 **Edit figures visually. Keep scripts untouched.** Tavotto™ opens the figures
 matplotlib has already drawn: titles, legends, curves and the page layout are all
